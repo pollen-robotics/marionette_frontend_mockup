@@ -1,0 +1,2318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Marionette</title>
+<!--
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║  MARIONETTE FRONTEND — Refined "Studio" Design                  ║
+  ║                                                                  ║
+  ║  This is a complete, working frontend for the Marionette app.    ║
+  ║  It connects to the backend API on the same origin (port 8042).  ║
+  ║                                                                  ║
+  ║  MOCK MODE: Add ?mock=true to the URL to run with fake data     ║
+  ║  and simulated recording/playback — no backend needed.           ║
+  ║                                                                  ║
+  ║  INTEGRATION NOTES:                                              ║
+  ║  - See INTEGRATION_GUIDE.md for full integration instructions    ║
+  ║  - Fonts are self-hosted in ./fonts/ (Sora + DM Mono)           ║
+  ║  - All API calls use relative URLs (/api/...)                   ║
+  ║  - CSS is inline for mockup; split to style.css for production  ║
+  ║  - JS is inline for mockup; split to main.js for production    ║
+  ╚══════════════════════════════════════════════════════════════════╝
+-->
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   FONT FACES — Self-hosted, no external dependencies.
+   Sora is a variable font: one file covers weights 300–800.
+   DM Mono has separate files for 400 and 500.
+
+   INTEGRATION: Copy the fonts/ directory to marionette/marionette/static/fonts/
+   and update the paths from ./fonts/ to /static/fonts/
+   ═══════════════════════════════════════════════════════════════════ */
+@font-face {
+  font-family: 'Sora';
+  src: url('./fonts/sora-400.woff2') format('woff2');
+  font-weight: 300 800; /* Variable font — single file covers full range */
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('./fonts/dm-mono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('./fonts/dm-mono-500.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   RESET & CUSTOM PROPERTIES
+
+   INTEGRATION: These CSS variables define the entire color scheme.
+   To tweak the look, only change values here.
+   ═══════════════════════════════════════════════════════════════════ */
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* --- Background & surfaces --- */
+  --bg: #09090b;
+  --surface: #18181b;
+  --surface-2: #27272a;
+  --border: #3f3f46;
+
+  /* --- Text --- */
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+
+  /* --- Accent colors --- */
+  --accent: #e11d48;            /* Primary action: recording */
+  --accent-glow: rgba(225,29,72,.35);
+  --blue: #38bdf8;              /* Countdown phase */
+  --blue-glow: rgba(56,189,248,.3);
+  --green: #34d399;             /* Playback, success */
+  --green-glow: rgba(52,211,153,.2);
+  --orange: #fb923c;            /* Upload/HF actions */
+
+  /* --- Radius --- */
+  --radius: 16px;
+  --radius-sm: 10px;
+
+  /* --- Fonts --- */
+  --font-body: 'Sora', system-ui, -apple-system, sans-serif;
+  --font-mono: 'DM Mono', 'Menlo', 'Consolas', monospace;
+}
+
+html { font-size: 16px; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle noise texture for depth — pure CSS, no image dependency */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+  opacity: .4;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   LAYOUT — Single-column, max 720px, centered.
+   This is the overall app shell. All sections stack vertically.
+   ═══════════════════════════════════════════════════════════════════ */
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   MOCK MODE BANNER — Only visible when ?mock=true
+   Shown at top of page to remind the user this is a simulation.
+
+   INTEGRATION: Remove this entire block. It's mockup-only.
+   ═══════════════════════════════════════════════════════════════════ */
+.mock-banner {
+  display: none; /* Hidden by default, shown via JS when mock mode active */
+  padding: .5rem 1rem;
+  background: rgba(251,146,60,.1);
+  border: 1px solid rgba(251,146,60,.3);
+  border-radius: var(--radius-sm);
+  font-size: .75rem;
+  color: var(--orange);
+  text-align: center;
+  font-family: var(--font-mono);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   HEADER — Logo/wordmark on left, mode badge + gear icon on right.
+
+   The mode badge shows the current app state (IDLE, RECORDING, etc.)
+   and changes color based on state. The gear icon opens the settings
+   drawer.
+   ═══════════════════════════════════════════════════════════════════ */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .5rem 0;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+/* Logo placeholder — INTEGRATION: Replace with actual logo asset if available.
+   Currently just a text "M" in an orange square. Could be an <img> or SVG. */
+.logo {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), #f43f5e);
+  display: grid; place-items: center;
+  font-weight: 800; font-size: 1rem; color: #fff;
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+.wordmark {
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -.02em;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* Mode badge — reflects current backend mode.
+   INTEGRATION: Updated by updateUI() from state.mode.
+   data-mode attribute controls the color variant via CSS. */
+.mode-badge {
+  font-family: var(--font-mono);
+  font-size: .7rem;
+  font-weight: 500;
+  padding: .35rem .75rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  transition: all .3s;
+}
+.mode-badge[data-mode="recording"] {
+  background: rgba(225,29,72,.15);
+  border-color: rgba(225,29,72,.4);
+  color: var(--accent);
+}
+.mode-badge[data-mode="countdown"] {
+  background: rgba(56,189,248,.1);
+  border-color: rgba(56,189,248,.3);
+  color: var(--blue);
+}
+.mode-badge[data-mode="playing"] {
+  background: rgba(52,211,153,.1);
+  border-color: rgba(52,211,153,.3);
+  color: var(--green);
+}
+
+/* Gear / settings icon button */
+.icon-btn {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: all .2s;
+}
+.icon-btn:hover { border-color: var(--text-muted); color: var(--text); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   RECORD HERO — The primary action area.
+
+   This is the centerpiece of the app. It contains:
+   1. A tagline explaining what the app does (for first-time users)
+   2. A giant circular record button
+   3. Name + duration fields (simple, not overwhelming)
+   4. A hint about the 3-second preparation time
+
+   DESIGN RATIONALE: The record button is intentionally oversized
+   to make the primary action unmistakable. First-time users should
+   immediately understand "I press this to start recording."
+   ═══════════════════════════════════════════════════════════════════ */
+.record-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.75rem;
+  padding: 2.5rem 1rem 2rem;
+  position: relative;
+}
+.record-hero-tagline {
+  font-size: .9rem;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 340px;
+  line-height: 1.6;
+}
+
+/* Giant record button with glow ring.
+   The outer .record-ring provides the hover glow border.
+   The inner .record-btn is the clickable circle.
+
+   States:
+   - Default: red gradient, white circle inside (universal "record" icon)
+   - .is-recording: white inner becomes a rounded square (universal "stop" icon)
+   - .is-countdown: blue gradient (visually distinct from recording)
+
+   INTEGRATION: The button click handler switches between queueRecording()
+   and stopRecording() based on current mode. */
+.record-ring {
+  position: relative;
+  width: 180px; height: 180px;
+  display: grid; place-items: center;
+}
+.record-ring::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  transition: all .4s cubic-bezier(.22,1,.36,1);
+}
+.record-ring:hover::before {
+  border-color: var(--accent);
+  box-shadow: 0 0 40px var(--accent-glow);
+}
+
+.record-btn {
+  width: 140px; height: 140px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #e11d48, #be123c);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .3rem;
+  box-shadow: 0 8px 40px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.15);
+  transition: all .25s cubic-bezier(.22,1,.36,1);
+  position: relative;
+  color: #fff;
+}
+
+/* White circle inside the button — "record" symbol */
+.record-btn .rec-icon {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.9);
+  transition: all .3s cubic-bezier(.22,1,.36,1);
+}
+
+/* Text label on the button */
+.record-btn .rec-label {
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .15em;
+  opacity: .85;
+  font-family: var(--font-body);
+}
+
+.record-btn:hover {
+  transform: scale(1.06);
+  box-shadow: 0 12px 60px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.2);
+}
+.record-btn:active { transform: scale(.97); }
+.record-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+/* Recording state — inner circle becomes square "stop" icon */
+.record-btn.is-recording .rec-icon {
+  border-radius: 6px;
+  width: 32px; height: 32px;
+}
+.record-btn.is-recording .rec-label { display: none; }
+
+/* Countdown state — button turns blue to match countdown overlay */
+.record-btn.is-countdown {
+  background: linear-gradient(145deg, var(--blue), #0ea5e9);
+  box-shadow: 0 8px 40px var(--blue-glow);
+  pointer-events: none; /* Can't click during countdown — use overlay stop btn */
+}
+.record-btn.is-countdown .rec-icon { opacity: 0; }
+.record-btn.is-countdown .rec-label { display: none; }
+
+/* Name + Duration input fields — side by side, below the button */
+.record-fields {
+  display: flex;
+  gap: .75rem;
+  width: 100%;
+  max-width: 380px;
+}
+.record-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+.record-field label {
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.record-field input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .7rem .85rem;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: .9rem;
+  outline: none;
+  transition: border-color .2s;
+}
+.record-field input:focus { border-color: var(--accent); }
+.record-field input::placeholder { color: var(--text-muted); opacity: .5; }
+
+/* Hide number input spinners — cross-browser */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+input[type=number] { -moz-appearance: textfield; }
+
+/* Small hint text below the fields */
+.record-hint {
+  font-size: .75rem;
+  color: var(--text-muted);
+  opacity: .6;
+  text-align: center;
+}
+
+/* "Downloaded dataset" warning — shown when active dataset is downloaded */
+.downloaded-warning {
+  display: none;
+  font-size: .8rem;
+  color: var(--orange);
+  text-align: center;
+  padding: .5rem;
+  background: rgba(251,146,60,.06);
+  border: 1px solid rgba(251,146,60,.15);
+  border-radius: var(--radius-sm);
+}
+.downloaded-warning.visible { display: block; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   PHASE OVERLAY — Full-screen countdown / recording display.
+
+   This overlay covers the entire screen during countdown and recording.
+   It's the biggest UX improvement over the original app, where users
+   confused the countdown with the actual recording.
+
+   TWO DISTINCT PHASES:
+   1. Countdown (3s): BLUE, giant integer numbers (3, 2, 1), "GET READY"
+   2. Recording: RED, decimal timer (4.2s), blinking dot, "RECORDING"
+
+   The visual difference is dramatic and impossible to confuse.
+
+   INTEGRATION: The overlay is driven by phase_start_at / phase_end_at
+   from the backend state. The animation loop (requestAnimationFrame)
+   computes progress from server timestamps + clock offset. This is
+   the same timing approach as the current app's main.js.
+   ═══════════════════════════════════════════════════════════════════ */
+.phase-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+.phase-overlay.active { display: flex; }
+
+/* Countdown variant — cool blue radial gradient background */
+.phase-overlay.countdown {
+  background: radial-gradient(circle at center, rgba(14,165,233,.08), var(--bg) 70%);
+}
+/* Recording variant — warm red radial gradient background */
+.phase-overlay.recording {
+  background: radial-gradient(circle at center, rgba(225,29,72,.06), var(--bg) 70%);
+}
+
+/* The big number display */
+.phase-number {
+  font-size: clamp(8rem, 20vw, 14rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.06em;
+  font-variant-numeric: tabular-nums;
+}
+.countdown .phase-number {
+  color: var(--blue);
+  text-shadow: 0 0 80px var(--blue-glow);
+  animation: countPulse .9s ease-in-out infinite;
+}
+.recording .phase-number {
+  color: var(--accent);
+  text-shadow: 0 0 60px var(--accent-glow);
+  font-size: clamp(4rem, 12vw, 7rem);
+}
+@keyframes countPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .7; transform: scale(1.05); }
+}
+
+/* Phase sublabel text (GET READY / RECORDING) */
+.phase-sublabel {
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: .2em;
+  font-weight: 600;
+}
+.countdown .phase-sublabel { color: var(--blue); }
+.recording .phase-sublabel { color: var(--accent); }
+
+/* Progress bar at the bottom of the overlay */
+.phase-progress {
+  width: min(320px, 80vw);
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-top: .5rem;
+}
+.phase-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .1s linear;
+}
+.countdown .phase-progress-fill { background: var(--blue); }
+.recording .phase-progress-fill { background: var(--accent); }
+
+/* Blinking red dot during recording (in the number display) */
+.recording .rec-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: recBlink 1s ease-in-out infinite;
+  display: inline-block;
+  margin-right: .5rem;
+  vertical-align: middle;
+}
+@keyframes recBlink { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* Stop/Cancel button in the overlay */
+.phase-stop-btn {
+  margin-top: 1.5rem;
+  padding: .6rem 1.8rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: .85rem;
+  cursor: pointer;
+  transition: all .2s;
+}
+.phase-stop-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   SECTION TABS — "Moves" and "Community"
+
+   The moves list and community browser are in separate tabs to
+   reduce clutter. Most users spend 95% of their time in Moves.
+
+   INTEGRATION: Tab switching is pure DOM toggling, no API calls.
+   ═══════════════════════════════════════════════════════════════════ */
+.section-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.section-tab {
+  padding: .75rem 1.25rem;
+  font-size: .8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: color .2s;
+}
+.section-tab:hover { color: var(--text); }
+.section-tab.active { color: var(--text); }
+.section-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px; left: 0; right: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+.tab-count {
+  font-family: var(--font-mono);
+  font-size: .65rem;
+  background: var(--surface-2);
+  padding: .15rem .45rem;
+  border-radius: 6px;
+  margin-left: .4rem;
+  vertical-align: 1px;
+}
+
+/* Tab panels — only .active is visible */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   MOVES LIST — Each recorded move is a card with metadata & actions.
+
+   Layout per move card:
+   [checkbox] [name + metadata] [play] [delete]
+
+   Checkboxes are for batch upload to Hugging Face. When any checkbox
+   is selected, the upload bar appears above the list.
+
+   INTEGRATION: renderMoves() is called from updateUI() on every
+   state poll. It rebuilds the DOM from state.moves[]. The move
+   object shape is: { id, label, duration, created_at, has_audio, is_uploaded }
+   ═══════════════════════════════════════════════════════════════════ */
+.moves-empty {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  font-size: .9rem;
+}
+.moves-empty-icon {
+  font-size: 2.5rem;
+  margin-bottom: .75rem;
+  opacity: .3;
+}
+
+/* Toolbar above moves: dataset selector + upload bar */
+.moves-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .75rem 0;
+  flex-wrap: wrap;
+}
+.moves-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+/* Orange upload bar — appears when moves are checkbox-selected */
+.upload-bar {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .5rem .85rem;
+  background: rgba(251,146,60,.06);
+  border: 1px solid rgba(251,146,60,.2);
+  border-radius: var(--radius-sm);
+}
+.upload-bar .upload-count {
+  font-size: .8rem;
+  color: var(--orange);
+  font-weight: 600;
+}
+.upload-btn {
+  padding: .45rem 1rem;
+  border-radius: 8px;
+  background: var(--orange);
+  color: #000;
+  font-weight: 600;
+  font-size: .8rem;
+  border: none;
+  cursor: pointer;
+  transition: opacity .2s;
+}
+.upload-btn:hover { opacity: .85; }
+.upload-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Dataset selector */
+.dataset-bar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.dataset-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .45rem .75rem;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: .8rem;
+  cursor: pointer;
+  outline: none;
+}
+.dataset-btn {
+  padding: .45rem .75rem;
+  border-radius: 8px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: .75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 500;
+  font-family: var(--font-body);
+}
+.dataset-btn:hover { border-color: var(--text-muted); color: var(--text); }
+
+/* Inline dataset creation form (appears when clicking "+ New") */
+.new-dataset-inline {
+  display: none;
+  gap: .5rem;
+  align-items: center;
+}
+.new-dataset-inline.active { display: flex; }
+.new-dataset-input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .45rem .75rem;
+  color: var(--text);
+  font-size: .8rem;
+  font-family: var(--font-body);
+  outline: none;
+}
+.new-dataset-input:focus { border-color: var(--accent); }
+
+/* Individual move card */
+.move-card {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  padding: .85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: .5rem;
+  transition: border-color .2s, background .2s;
+}
+.move-card:hover { border-color: var(--text-muted); background: var(--surface-2); }
+.move-card.is-playing {
+  border-color: var(--green);
+  box-shadow: 0 0 20px var(--green-glow);
+}
+.move-card .move-check {
+  width: 18px; height: 18px;
+  accent-color: var(--orange);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.move-info {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: .2rem;
+}
+.move-name {
+  font-weight: 600;
+  font-size: .9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.move-meta-row {
+  font-size: .75rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: .6rem;
+  align-items: center;
+  font-family: var(--font-mono);
+}
+.move-meta-row .audio-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.move-meta-row .audio-dot.has { background: var(--green); }
+.move-meta-row .audio-dot.none { background: var(--text-muted); opacity: .3; }
+
+/* "Uploaded" badge on moves that have been synced to HF */
+.move-badge {
+  font-size: .6rem;
+  padding: .15rem .4rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 600;
+}
+.move-badge.uploaded {
+  background: var(--green-glow);
+  color: var(--green);
+  border: 1px solid rgba(52,211,153,.25);
+}
+
+/* Play/Delete action buttons inside move cards */
+.move-actions { display: flex; gap: .35rem; flex-shrink: 0; }
+.move-action {
+  padding: .45rem .85rem;
+  border-radius: 8px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: .75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: var(--font-body);
+}
+.move-action:hover { border-color: var(--text-muted); color: var(--text); }
+.move-action.play-action:hover { border-color: var(--green); color: var(--green); }
+.move-action.delete-action:hover { border-color: var(--accent); color: var(--accent); }
+.move-action:disabled { opacity: .3; cursor: not-allowed; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   COMMUNITY TAB — Browse & download datasets from Hugging Face.
+
+   INTEGRATION: Uses /api/datasets/community (GET) and
+   /api/datasets/download (POST). Same as current app.
+   ═══════════════════════════════════════════════════════════════════ */
+.community-toolbar {
+  display: flex;
+  gap: .5rem;
+  padding: .75rem 0;
+}
+.community-fetch-btn {
+  padding: .5rem 1.2rem;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: .85rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--font-body);
+  transition: all .2s;
+}
+.community-fetch-btn:hover { border-color: var(--text-muted); }
+.community-download-btn {
+  padding: .5rem 1.2rem;
+  border-radius: 8px;
+  background: var(--blue);
+  color: #000;
+  font-weight: 600;
+  font-size: .85rem;
+  border: none;
+  cursor: pointer;
+  transition: opacity .2s;
+}
+.community-download-btn:disabled { opacity: .3; cursor: not-allowed; }
+.community-status { font-size: .8rem; color: var(--text-muted); padding: .5rem 0; }
+.community-card {
+  display: flex;
+  align-items: flex-start;
+  gap: .85rem;
+  padding: .85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: .5rem;
+}
+.community-card .comm-check {
+  width: 18px; height: 18px;
+  accent-color: var(--blue);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-top: .15rem;
+}
+.community-card .comm-info { flex: 1; min-width: 0; }
+.community-card .comm-name { font-weight: 600; font-size: .9rem; }
+.community-card .comm-repo {
+  font-size: .75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.community-card .comm-stats {
+  font-size: .75rem;
+  color: var(--text-muted);
+  margin-top: .3rem;
+  display: flex;
+  gap: .75rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SETTINGS DRAWER — Slides in from right. Contains secondary options.
+
+   Sections:
+   1. Audio Source (mic / upload / silent)
+   2. Hugging Face login status (auto-detected, not editable)
+   3. Storage (datasets folder path)
+   4. Experimental (motion models toggle)
+
+   INTEGRATION: Each section maps to specific API endpoints.
+   See inline comments in the JS section for details.
+   ═══════════════════════════════════════════════════════════════════ */
+.settings-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 2000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s;
+}
+.settings-backdrop.open { opacity: 1; pointer-events: auto; }
+
+.settings-drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: min(400px, 90vw);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  z-index: 2001;
+  transform: translateX(100%);
+  transition: transform .35s cubic-bezier(.22,1,.36,1);
+  overflow-y: auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.settings-drawer.open { transform: translateX(0); }
+
+.settings-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.settings-title h2 { font-size: 1.1rem; font-weight: 700; }
+.settings-close {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: grid; place-items: center;
+  font-size: 1.1rem;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+.settings-section h3 {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+.settings-label { font-size: .8rem; color: var(--text-muted); }
+.settings-input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .65rem .85rem;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: .85rem;
+  outline: none;
+}
+.settings-input:focus { border-color: var(--accent); }
+
+/* Radio group for audio source selection */
+.settings-radio-group { display: flex; gap: .5rem; }
+.settings-radio {
+  flex: 1;
+  padding: .6rem;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  cursor: pointer;
+  transition: all .2s;
+  font-size: .85rem;
+}
+.settings-radio:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(225,29,72,.06);
+}
+.settings-radio input { accent-color: var(--accent); }
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .65rem .85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.settings-toggle span { font-size: .85rem; }
+.settings-toggle input { accent-color: var(--accent); width: 18px; height: 18px; }
+
+.settings-save-btn {
+  padding: .65rem 1.2rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: .85rem;
+  border: none;
+  cursor: pointer;
+  transition: opacity .2s;
+}
+.settings-save-btn:hover { opacity: .85; }
+.settings-hint { font-size: .75rem; color: var(--text-muted); opacity: .7; }
+
+/* HF login status display — read-only, auto-detected from backend */
+.hf-status {
+  padding: .65rem .85rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: .85rem;
+}
+.hf-status.logged-in {
+  border-color: rgba(52,211,153,.25);
+  color: var(--green);
+}
+.hf-status.logged-out { color: var(--text-muted); }
+
+/* Audio upload drop zone (inside settings, only when "Upload" audio source selected) */
+.audio-upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: .85rem;
+  cursor: pointer;
+  transition: all .2s;
+}
+.audio-upload-zone:hover { border-color: var(--orange); color: var(--text); }
+.audio-upload-zone.drag-over { border-color: var(--orange); background: rgba(251,146,60,.05); }
+.audio-upload-zone input { display: none; }
+.audio-upload-status { font-size: .8rem; color: var(--text-muted); margin-top: .5rem; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   RESPONSIVE — Mobile-first adjustments.
+
+   On narrow screens: stack fields vertically, full-width buttons.
+   ═══════════════════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  .app { padding: 1rem 1rem 3rem; }
+  .record-ring { width: 150px; height: 150px; }
+  .record-btn { width: 115px; height: 115px; }
+  .record-btn .rec-icon { width: 36px; height: 36px; }
+  .record-fields { flex-direction: column; max-width: 100%; }
+  .move-card { flex-wrap: wrap; }
+  .move-actions { width: 100%; justify-content: flex-end; }
+  .moves-toolbar { flex-direction: column; align-items: stretch; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ANIMATIONS — Entrance animations for page load.
+   ═══════════════════════════════════════════════════════════════════ */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.fade-in { animation: fadeIn .4s ease-out both; }
+.fade-in-1 { animation-delay: .05s; }
+.fade-in-2 { animation-delay: .1s; }
+.fade-in-3 { animation-delay: .15s; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- ════════ MOCK MODE BANNER ════════
+       INTEGRATION: Remove this entire div. -->
+  <div class="mock-banner" id="mock-banner">
+    MOCK MODE — No backend connection. All data is simulated.
+  </div>
+
+  <!-- ════════ HEADER ════════ -->
+  <header class="header fade-in">
+    <div class="header-left">
+      <!-- Logo placeholder — replace with real logo asset when available -->
+      <div class="logo">M</div>
+      <span class="wordmark">Marionette</span>
+    </div>
+    <div class="header-right">
+      <div class="mode-badge" id="mode-badge">IDLE</div>
+      <button class="icon-btn" id="settings-btn" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ════════ RECORD HERO ════════ -->
+  <section class="record-hero fade-in fade-in-1" id="record-hero">
+    <p class="record-hero-tagline">
+      Move Reachy Mini's head with your hands to create animated movements with sound
+    </p>
+    <div class="record-ring">
+      <button class="record-btn" id="record-btn" title="Start Recording">
+        <span class="rec-icon"></span>
+        <span class="rec-label">Record</span>
+      </button>
+    </div>
+    <div class="record-fields">
+      <div class="record-field">
+        <label for="rec-name">Name</label>
+        <input type="text" id="rec-name" placeholder="e.g. happy-dance" maxlength="80"/>
+      </div>
+      <div class="record-field" style="max-width:110px">
+        <label for="rec-duration">Duration</label>
+        <input type="number" id="rec-duration" min="0.5" max="300" step="any" placeholder="5.0"/>
+      </div>
+    </div>
+    <p class="record-hint">3 seconds to prepare before recording starts</p>
+    <p class="downloaded-warning" id="downloaded-warning">
+      Switch to a local dataset to record new moves
+    </p>
+  </section>
+
+  <!-- ════════ SECTION TABS ════════ -->
+  <nav class="section-tabs fade-in fade-in-2">
+    <button class="section-tab active" data-tab="moves">
+      Moves <span class="tab-count" id="moves-count">0</span>
+    </button>
+    <button class="section-tab" data-tab="community">Community</button>
+  </nav>
+
+  <!-- ════════ MOVES TAB ════════ -->
+  <div class="tab-panel active" id="tab-moves">
+    <div class="moves-toolbar">
+      <div class="moves-toolbar-left">
+        <div class="dataset-bar">
+          <select class="dataset-select" id="dataset-select"></select>
+          <button class="dataset-btn" id="new-dataset-btn">+ New</button>
+        </div>
+        <div class="new-dataset-inline" id="new-dataset-inline">
+          <input class="new-dataset-input" id="new-dataset-input"
+                 placeholder="my-new-dataset" maxlength="80" pattern="[a-z0-9_-]+"/>
+          <button class="dataset-btn" id="create-dataset-btn">Create</button>
+          <button class="dataset-btn" id="cancel-dataset-btn">Cancel</button>
+        </div>
+      </div>
+      <div class="upload-bar" id="upload-bar" style="display:none">
+        <span class="upload-count" id="upload-count">0 selected</span>
+        <button class="upload-btn" id="upload-btn">Upload to HF</button>
+      </div>
+    </div>
+    <div id="moves-list">
+      <div class="moves-empty">
+        <div class="moves-empty-icon">&#9898;</div>
+        Record your first move to see it here
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ COMMUNITY TAB ════════ -->
+  <div class="tab-panel" id="tab-community">
+    <div class="community-toolbar">
+      <button class="community-fetch-btn" id="fetch-community-btn">
+        Fetch community datasets
+      </button>
+      <button class="community-download-btn" id="download-community-btn" disabled>
+        Download selected
+      </button>
+    </div>
+    <p class="community-status" id="community-status"></p>
+    <div id="community-list"></div>
+  </div>
+</div>
+
+<!-- ════════ PHASE OVERLAY ════════ -->
+<div class="phase-overlay" id="phase-overlay">
+  <div class="phase-number" id="phase-number"></div>
+  <div class="phase-sublabel" id="phase-sublabel"></div>
+  <div class="phase-progress">
+    <div class="phase-progress-fill" id="phase-fill"></div>
+  </div>
+  <button class="phase-stop-btn" id="phase-stop-btn">Stop</button>
+</div>
+
+<!-- ════════ SETTINGS DRAWER ════════ -->
+<div class="settings-backdrop" id="settings-backdrop"></div>
+<div class="settings-drawer" id="settings-drawer">
+  <div class="settings-title">
+    <h2>Settings</h2>
+    <button class="settings-close" id="settings-close">&times;</button>
+  </div>
+
+  <!-- Audio source: mic (default), upload file, or silent -->
+  <div class="settings-section">
+    <h3>Audio Source</h3>
+    <div class="settings-radio-group">
+      <label class="settings-radio">
+        <input type="radio" name="audio-src" value="mic" checked/> Mic
+      </label>
+      <label class="settings-radio">
+        <input type="radio" name="audio-src" value="upload"/> Upload
+      </label>
+      <label class="settings-radio">
+        <input type="radio" name="audio-src" value="none"/> Silent
+      </label>
+    </div>
+    <div id="audio-upload-section" style="display:none">
+      <div class="audio-upload-zone" id="audio-upload-zone">
+        Drop a WAV or MP3 here, or click to browse
+        <input type="file" id="audio-file-input" accept=".wav,.mp3,audio/wav,audio/mpeg"/>
+      </div>
+      <p class="audio-upload-status" id="audio-upload-status"></p>
+    </div>
+  </div>
+
+  <!-- Hugging Face — auto-detected, NOT manually editable.
+       INTEGRATION: The backend returns config.hf_username from whoami().
+       If logged in, show "Logged in as X". If not, show "Not logged in"
+       with a hint to run huggingface-cli login. NO text input field. -->
+  <div class="settings-section">
+    <h3>Hugging Face</h3>
+    <div class="hf-status" id="hf-status">Checking login...</div>
+    <p class="settings-hint" id="hf-hint"></p>
+  </div>
+
+  <!-- Storage folder -->
+  <div class="settings-section">
+    <h3>Storage</h3>
+    <div class="settings-row">
+      <span class="settings-label">Datasets folder</span>
+      <input class="settings-input" id="dataset-root-input" type="text"
+             placeholder="/home/user/datasets"/>
+    </div>
+    <button class="settings-save-btn" id="update-root-btn">Update folder</button>
+    <p class="settings-hint" id="dataset-root-hint"></p>
+  </div>
+
+  <!-- Experimental features -->
+  <div class="settings-section" id="experimental-section">
+    <h3>Experimental</h3>
+    <label class="settings-toggle">
+      <span>Motion compensation models</span>
+      <input type="checkbox" id="feature-motion-models"/>
+    </label>
+    <div id="motion-model-group" style="display:none">
+      <div class="settings-row">
+        <span class="settings-label">Model</span>
+        <select class="settings-input" id="motion-model-select" style="cursor:pointer"></select>
+      </div>
+      <p class="settings-hint" id="motion-model-hint"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   MARIONETTE FRONTEND — JavaScript
+
+   Architecture overview:
+   ────────────────────
+   1. MOCK LAYER: If ?mock=true, all fetch() calls are intercepted by
+      mockFetch() which simulates the backend. Remove this entire section
+      for production.
+
+   2. STATE POLLING: fetchState() runs every 1500ms, calls GET /api/state,
+      and passes the response to updateUI().
+
+   3. UI UPDATE: updateUI() is the single function that synchronizes all
+      DOM elements with the backend state. It's called after every poll
+      and after every user action.
+
+   4. PHASE ANIMATION: A requestAnimationFrame loop continuously updates
+      the countdown/recording overlay based on phase_start_at / phase_end_at
+      timestamps from the backend.
+
+   5. EVENT HANDLERS: All user interactions (record, play, delete, etc.)
+      send the appropriate API call and then trigger a state refresh.
+
+   API CONTRACT (all endpoints are relative to the same origin):
+   ──────────────────────────────────────────────────────────────
+   GET  /api/state                    → Full app state (polled)
+   POST /api/record                   → { duration, record_audio, label, uploaded_audio_id? }
+   POST /api/play                     → { move_id }
+   POST /api/play/stop                → {}
+   POST /api/record/stop              → {}
+   DELETE /api/moves/{move_id}        → {}
+   GET  /api/datasets                 → Dataset list
+   POST /api/datasets                 → { name, label? }
+   POST /api/datasets/select          → { dataset_id }
+   POST /api/datasets/sync            → { hf_username, move_ids }
+   POST /api/datasets/root            → { path }
+   GET  /api/datasets/community       → Community datasets
+   POST /api/datasets/download        → { repo_id, label? }
+   POST /api/upload-audio             → multipart FormData
+   POST /api/experiments              → { motion_models?, duration_seconds? }
+   POST /api/motion-model             → { name }
+   ═══════════════════════════════════════════════════════════════════════ */
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 1: MOCK MODE
+//
+// INTEGRATION: Delete everything between "BEGIN MOCK" and "END MOCK"
+// comments. Then change `const MOCK = false;` to just remove it.
+// The real app only needs the code after the END MOCK marker.
+// ═══════════════════════════════════════════════════════════════════════
+
+// BEGIN MOCK ──────────────────────────────────────────────────────────
+
+const MOCK = new URLSearchParams(window.location.search).has('mock');
+
+/* Mock state — simulates the backend's full state object */
+const mockState = {
+  mode: 'idle',
+  message: 'Ready to capture moves',
+  active_move: null,
+  phase_start_at: null,
+  phase_end_at: null,
+  server_time: Date.now() / 1000,
+  recording_stats: null,
+  moves: [
+    /* Pre-populated fake moves so the list isn't empty */
+    { id: 'happy-dance', label: 'happy-dance', duration: 5.2, created_at: Date.now()/1000 - 3600, has_audio: true, is_uploaded: true },
+    { id: 'gentle-nod', label: 'gentle-nod', duration: 3.0, created_at: Date.now()/1000 - 1800, has_audio: true, is_uploaded: false },
+    { id: 'look-around', label: 'look-around', duration: 8.5, created_at: Date.now()/1000 - 600, has_audio: false, is_uploaded: false },
+  ],
+  config: {
+    preferred_duration: 5.0,
+    default_duration: 5.0,
+    countdown_seconds: 3,
+    audio_available: true,
+    hf_username: 'demo-user',
+    dataset_root_path: '/home/user/reachy_mini_datasets',
+    active_dataset_path: '/home/user/reachy_mini_datasets/local_dataset/data',
+    features: { motion_models: false },
+    feature_support: { motion_models: true },
+    motion_models: null,
+  },
+  datasets: {
+    active_id: 'default',
+    root_path: '/home/user/reachy_mini_datasets',
+    entries: [
+      { id: 'default', label: 'Local dataset', path: '/home/user/reachy_mini_datasets/local_dataset', origin: 'local' },
+      { id: 'downloaded-1', label: 'Community moves (alice)', path: '/home/user/reachy_mini_datasets/alice-moves', origin: 'downloaded' },
+    ],
+  },
+};
+
+/* Timer handles for mock recording/playback simulation */
+let mockRecordTimer = null;
+let mockPlayTimer = null;
+
+/* Mock community datasets */
+const mockCommunityDatasets = [
+  { repo_id: 'alice/reachy-dance-moves', pretty_name: 'Dance Moves Collection', likes: 12, downloads: 45, last_modified: '2025-12-15T10:30:00Z', tags: ['reachy_mini_community_moves'] },
+  { repo_id: 'bob/reachy-greetings', pretty_name: 'Greeting Gestures', likes: 8, downloads: 23, last_modified: '2025-11-20T14:00:00Z', tags: ['reachy_mini_community_moves'] },
+  { repo_id: 'carol/reachy-reactions', pretty_name: 'Reaction Animations', likes: 5, downloads: 11, last_modified: '2025-10-05T09:15:00Z', tags: ['reachy_mini_community_moves'] },
+];
+
+/**
+ * mockFetch — Intercepts fetch() calls and returns mock responses.
+ * Simulates recording (with real countdown + recording timers),
+ * playback, delete, dataset switching, etc.
+ */
+function mockFetch(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const body = options.body ? (typeof options.body === 'string' ? JSON.parse(options.body) : null) : null;
+
+  /* GET /api/state — return current mock state */
+  if (url === '/api/state' && method === 'GET') {
+    mockState.server_time = Date.now() / 1000;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(JSON.parse(JSON.stringify(mockState))) });
+  }
+
+  /* POST /api/record — start mock recording sequence */
+  if (url === '/api/record' && method === 'POST') {
+    if (mockState.mode !== 'idle' && mockState.mode !== 'queued') {
+      return Promise.resolve({ ok: false, text: () => Promise.resolve('Robot is busy') });
+    }
+    const duration = body?.duration || 5;
+    const label = body?.label || `take-${Date.now()}`;
+    const moveId = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `take-${Date.now()}`;
+
+    // Phase 1: Countdown (3 seconds)
+    const now = Date.now() / 1000;
+    mockState.mode = 'countdown';
+    mockState.message = 'Get ready...';
+    mockState.phase_start_at = now;
+    mockState.phase_end_at = now + 3;
+
+    // Phase 2: Recording (after countdown ends)
+    mockRecordTimer = setTimeout(() => {
+      const recStart = Date.now() / 1000;
+      mockState.mode = 'recording';
+      mockState.message = `Recording ${label}`;
+      mockState.active_move = moveId;
+      mockState.phase_start_at = recStart;
+      mockState.phase_end_at = recStart + duration;
+
+      // Phase 3: Done (after recording duration ends)
+      mockRecordTimer = setTimeout(() => {
+        mockState.moves.unshift({
+          id: moveId, label: label || moveId,
+          duration: duration,
+          created_at: Date.now() / 1000,
+          has_audio: true, is_uploaded: false,
+        });
+        mockState.mode = 'idle';
+        mockState.message = `Recorded ${label}`;
+        mockState.active_move = null;
+        mockState.phase_start_at = null;
+        mockState.phase_end_at = null;
+        mockState.recording_stats = { poses: Math.round(duration * 100), duration: duration, poses_per_second: 100 };
+        mockRecordTimer = null;
+      }, duration * 1000);
+    }, 3000);
+
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ accepted: true, move_id: moveId, label }) });
+  }
+
+  /* POST /api/record/stop — cancel recording */
+  if (url === '/api/record/stop' && method === 'POST') {
+    if (mockRecordTimer) { clearTimeout(mockRecordTimer); mockRecordTimer = null; }
+    mockState.mode = 'idle';
+    mockState.message = 'Recording cancelled';
+    mockState.active_move = null;
+    mockState.phase_start_at = null;
+    mockState.phase_end_at = null;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ stopped: true }) });
+  }
+
+  /* POST /api/play — start mock playback */
+  if (url === '/api/play' && method === 'POST') {
+    const move = mockState.moves.find(m => m.id === body?.move_id);
+    if (!move) return Promise.resolve({ ok: false, text: () => Promise.resolve('Move not found') });
+    mockState.mode = 'playing';
+    mockState.message = `Playing ${move.label}`;
+    mockState.active_move = move.id;
+    mockPlayTimer = setTimeout(() => {
+      mockState.mode = 'idle';
+      mockState.message = `Finished playing ${move.label}`;
+      mockState.active_move = null;
+      mockPlayTimer = null;
+    }, (move.duration || 3) * 1000);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ accepted: true }) });
+  }
+
+  /* POST /api/play/stop */
+  if (url === '/api/play/stop' && method === 'POST') {
+    if (mockPlayTimer) { clearTimeout(mockPlayTimer); mockPlayTimer = null; }
+    mockState.mode = 'idle';
+    mockState.message = 'Playback stopped';
+    mockState.active_move = null;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ stopped: true }) });
+  }
+
+  /* DELETE /api/moves/{id} */
+  if (url.startsWith('/api/moves/') && method === 'DELETE') {
+    const id = decodeURIComponent(url.split('/api/moves/')[1]);
+    mockState.moves = mockState.moves.filter(m => m.id !== id);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'deleted' }) });
+  }
+
+  /* POST /api/datasets — create new dataset */
+  if (url === '/api/datasets' && method === 'POST') {
+    const name = body?.name;
+    const id = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+    if (mockState.datasets.entries.some(e => e.id === id)) {
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({ detail: 'Dataset name already used.' }) });
+    }
+    const entry = { id, label: name, path: mockState.datasets.root_path + '/' + name, origin: 'local' };
+    mockState.datasets.entries.push(entry);
+    mockState.datasets.active_id = id;
+    mockState.moves = []; // New empty dataset
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'created', dataset: entry }) });
+  }
+
+  /* POST /api/datasets/select */
+  if (url === '/api/datasets/select' && method === 'POST') {
+    const dsId = body?.dataset_id;
+    if (!mockState.datasets.entries.find(e => e.id === dsId)) {
+      return Promise.resolve({ ok: false, text: () => Promise.resolve('Dataset not found') });
+    }
+    mockState.datasets.active_id = dsId;
+    // Simulate different moves for different datasets
+    if (dsId === 'default') {
+      mockState.moves = [
+        { id: 'happy-dance', label: 'happy-dance', duration: 5.2, created_at: Date.now()/1000 - 3600, has_audio: true, is_uploaded: true },
+        { id: 'gentle-nod', label: 'gentle-nod', duration: 3.0, created_at: Date.now()/1000 - 1800, has_audio: true, is_uploaded: false },
+        { id: 'look-around', label: 'look-around', duration: 8.5, created_at: Date.now()/1000 - 600, has_audio: false, is_uploaded: false },
+      ];
+    } else {
+      mockState.moves = [
+        { id: 'wave-hello', label: 'wave-hello', duration: 4.0, created_at: Date.now()/1000 - 7200, has_audio: true, is_uploaded: false },
+        { id: 'head-shake', label: 'head-shake', duration: 2.5, created_at: Date.now()/1000 - 5400, has_audio: true, is_uploaded: false },
+      ];
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'selected' }) });
+  }
+
+  /* POST /api/datasets/sync — fake upload */
+  if (url === '/api/datasets/sync' && method === 'POST') {
+    const ids = body?.move_ids || [];
+    ids.forEach(id => {
+      const m = mockState.moves.find(mv => mv.id === id);
+      if (m) m.is_uploaded = true;
+    });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'synced', repo_id: 'demo-user/my-dataset', uploaded_moves: ids.length, url: '#' }) });
+  }
+
+  /* POST /api/datasets/root */
+  if (url === '/api/datasets/root' && method === 'POST') {
+    mockState.datasets.root_path = body?.path || mockState.datasets.root_path;
+    mockState.config.dataset_root_path = mockState.datasets.root_path;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'updated' }) });
+  }
+
+  /* GET /api/datasets/community */
+  if (url === '/api/datasets/community' && method === 'GET') {
+    return new Promise(resolve => {
+      setTimeout(() => resolve({ ok: true, json: () => Promise.resolve({ datasets: mockCommunityDatasets }) }), 800);
+    });
+  }
+
+  /* POST /api/datasets/download — fake download */
+  if (url === '/api/datasets/download' && method === 'POST') {
+    const repoId = body?.repo_id;
+    const [owner, name] = repoId.split('/');
+    const entry = { id: `dl-${name}`, label: body?.label || repoId, path: mockState.datasets.root_path + '/' + name, origin: 'downloaded' };
+    mockState.datasets.entries.push(entry);
+    return new Promise(resolve => {
+      setTimeout(() => resolve({ ok: true, json: () => Promise.resolve({ status: 'downloaded', dataset: entry }) }), 1000);
+    });
+  }
+
+  /* POST /api/upload-audio — fake audio upload */
+  if (url === '/api/upload-audio' && method === 'POST') {
+    return new Promise(resolve => {
+      setTimeout(() => resolve({ ok: true, json: () => Promise.resolve({ upload_id: 'mock-' + Date.now(), filename: 'uploaded.wav', duration: 7.3 }) }), 500);
+    });
+  }
+
+  /* POST /api/experiments */
+  if (url === '/api/experiments' && method === 'POST') {
+    if (body?.motion_models !== undefined) mockState.config.features.motion_models = body.motion_models;
+    if (body?.duration_seconds) mockState.config.preferred_duration = body.duration_seconds;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'updated', features: mockState.config.features }) });
+  }
+
+  /* POST /api/motion-model */
+  if (url === '/api/motion-model' && method === 'POST') {
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'updated', active: body?.name }) });
+  }
+
+  /* Fallback: unhandled route */
+  console.warn('[MOCK] Unhandled:', method, url);
+  return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+}
+
+/**
+ * apiFetch — Wrapper around fetch() that routes through mockFetch in mock mode.
+ * INTEGRATION: Replace all apiFetch() calls with plain fetch(), or just
+ * change this function to: const apiFetch = fetch.bind(window);
+ */
+function apiFetch(url, options) {
+  if (MOCK) return mockFetch(url, options);
+  return fetch(url, options);
+}
+
+// END MOCK ────────────────────────────────────────────────────────────
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 2: APP STATE & ELEMENT REFERENCES
+// ═══════════════════════════════════════════════════════════════════════
+
+let lastState = null;     // Last received state from backend
+let busy = false;         // True when mode is not idle/queued
+let clockOffset = 0;      // Diff between server clock and local clock (seconds)
+let phaseMode = 'idle';   // Current phase for overlay: 'idle', 'countdown', 'recording'
+let phaseStartAt = null;  // Server timestamp: when current phase started
+let phaseEndAt = null;    // Server timestamp: when current phase ends
+let selectedMoves = new Set();    // Move IDs selected for HF upload
+let communitySelection = new Set(); // Community dataset repo_ids selected for download
+let uploadedAudioId = null;       // ID of uploaded audio file (from /api/upload-audio)
+let uploadedAudioFilename = null; // Original filename of uploaded audio
+let pollingHandle = null;         // setInterval handle for state polling
+let stateSeq = 0;         // Monotonic counter to ignore out-of-order responses
+let latestSeq = 0;        // Highest seq we've processed
+let hfUsername = null;     // Auto-detected HF username (from backend)
+
+/* DOM element references — gathered once at startup */
+const $modeBadge = document.getElementById('mode-badge');
+const $recordBtn = document.getElementById('record-btn');
+const $recName = document.getElementById('rec-name');
+const $recDuration = document.getElementById('rec-duration');
+const $downloadedWarning = document.getElementById('downloaded-warning');
+const $movesList = document.getElementById('moves-list');
+const $movesCount = document.getElementById('moves-count');
+const $uploadBar = document.getElementById('upload-bar');
+const $uploadCount = document.getElementById('upload-count');
+const $uploadBtn = document.getElementById('upload-btn');
+const $datasetSelect = document.getElementById('dataset-select');
+const $newDatasetBtn = document.getElementById('new-dataset-btn');
+const $newDatasetInline = document.getElementById('new-dataset-inline');
+const $newDatasetInput = document.getElementById('new-dataset-input');
+const $createDatasetBtn = document.getElementById('create-dataset-btn');
+const $cancelDatasetBtn = document.getElementById('cancel-dataset-btn');
+const $settingsBtn = document.getElementById('settings-btn');
+const $settingsBackdrop = document.getElementById('settings-backdrop');
+const $settingsDrawer = document.getElementById('settings-drawer');
+const $settingsClose = document.getElementById('settings-close');
+const $phaseOverlay = document.getElementById('phase-overlay');
+const $phaseNumber = document.getElementById('phase-number');
+const $phaseSublabel = document.getElementById('phase-sublabel');
+const $phaseFill = document.getElementById('phase-fill');
+const $phaseStopBtn = document.getElementById('phase-stop-btn');
+const $hfStatus = document.getElementById('hf-status');
+const $hfHint = document.getElementById('hf-hint');
+const $datasetRootInput = document.getElementById('dataset-root-input');
+const $datasetRootHint = document.getElementById('dataset-root-hint');
+const $updateRootBtn = document.getElementById('update-root-btn');
+const $featureMotionModels = document.getElementById('feature-motion-models');
+const $motionModelGroup = document.getElementById('motion-model-group');
+const $motionModelSelect = document.getElementById('motion-model-select');
+const $motionModelHint = document.getElementById('motion-model-hint');
+const $fetchCommunityBtn = document.getElementById('fetch-community-btn');
+const $downloadCommunityBtn = document.getElementById('download-community-btn');
+const $communityStatus = document.getElementById('community-status');
+const $communityList = document.getElementById('community-list');
+const $audioFileInput = document.getElementById('audio-file-input');
+const $audioUploadZone = document.getElementById('audio-upload-zone');
+const $audioUploadSection = document.getElementById('audio-upload-section');
+const $audioUploadStatus = document.getElementById('audio-upload-status');
+const $mockBanner = document.getElementById('mock-banner');
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 3: STATE POLLING
+// ═══════════════════════════════════════════════════════════════════════
+
+async function fetchState() {
+  const id = ++stateSeq;
+  try {
+    const r = await apiFetch('/api/state', { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    if (id < latestSeq) return; // Ignore stale responses
+    latestSeq = id;
+    updateUI(data);
+    lastState = data;
+  } catch (e) {
+    console.error('State poll failed:', e);
+  }
+}
+
+function startPolling() {
+  fetchState();
+  pollingHandle = setInterval(fetchState, 1500);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 4: UI UPDATE — Single function that syncs all DOM with state
+//
+// INTEGRATION: This is the most important function. It's called after
+// every poll and every action. It must handle ALL state shapes the
+// backend can return.
+// ═══════════════════════════════════════════════════════════════════════
+
+function updateUI(s) {
+  // ── Mode badge ──
+  $modeBadge.textContent = s.mode.toUpperCase();
+  $modeBadge.dataset.mode = s.mode;
+
+  // ── Busy flag — disables interactive controls ──
+  busy = !['idle', 'queued'].includes(s.mode);
+
+  // ── Record button state ──
+  const activeEntry = s.datasets?.entries?.find(e => e.id === s.datasets?.active_id);
+  const isDownloaded = activeEntry?.origin === 'downloaded';
+  $recordBtn.disabled = busy || isDownloaded;
+
+  // Show warning when active dataset is downloaded (can't record into it)
+  $downloadedWarning.classList.toggle('visible', isDownloaded && !busy);
+
+  // Visual state of record button
+  $recordBtn.classList.toggle('is-recording', s.mode === 'recording');
+  $recordBtn.classList.toggle('is-countdown', s.mode === 'countdown');
+
+  // ── Config (from state.config) ──
+  if (s.config) {
+    // Duration field placeholder from preferred duration
+    const dur = s.config.preferred_duration || s.config.default_duration || 5;
+    if (!$recDuration.value) $recDuration.placeholder = dur.toFixed(1);
+
+    // Hugging Face login status — auto-detected, NOT editable
+    if (s.config.hf_username) {
+      hfUsername = s.config.hf_username;
+      $hfStatus.textContent = `Logged in as ${s.config.hf_username}`;
+      $hfStatus.className = 'hf-status logged-in';
+      $hfHint.textContent = '';
+    } else {
+      hfUsername = null;
+      $hfStatus.textContent = 'Not logged in';
+      $hfStatus.className = 'hf-status logged-out';
+      $hfHint.textContent = 'Run "huggingface-cli login" in a terminal to enable uploads.';
+    }
+
+    // Dataset root
+    if (s.config.dataset_root_path) {
+      if (!$datasetRootInput.value) $datasetRootInput.value = s.config.dataset_root_path;
+      if ($datasetRootHint) $datasetRootHint.textContent = s.config.dataset_root_path;
+    }
+
+    // Audio availability — disable mic option if not available
+    const micRadio = document.querySelector('input[name="audio-src"][value="mic"]');
+    if (micRadio) {
+      micRadio.disabled = !s.config.audio_available;
+      if (!s.config.audio_available && micRadio.checked) {
+        document.querySelector('input[name="audio-src"][value="none"]').checked = true;
+      }
+    }
+
+    // Experimental features
+    updateExperimentalUI(s.config);
+  }
+
+  // ── Datasets ──
+  if (s.datasets) updateDatasetUI(s.datasets);
+
+  // ── Phase timing (for overlay animation) ──
+  updatePhase(s);
+
+  // ── Moves list ──
+  const moves = s.moves || [];
+  reconcileMoves(moves);
+  renderMoves(moves, s.mode, s.active_move);
+  $movesCount.textContent = moves.length;
+  updateUploadBar();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 5: PHASE OVERLAY — Countdown & Recording full-screen display
+//
+// TIMING APPROACH: The backend sends phase_start_at and phase_end_at
+// as Unix timestamps. The frontend computes progress as:
+//   remaining = phase_end_at - (local_time + clock_offset)
+//   ratio = remaining / (phase_end_at - phase_start_at)
+//
+// clock_offset = server_time - local_time, calibrated each poll.
+// This handles network jitter and clock drift.
+// ═══════════════════════════════════════════════════════════════════════
+
+function updatePhase(s) {
+  if (s.server_time) clockOffset = s.server_time - Date.now() / 1000;
+
+  if ((s.mode === 'countdown' || s.mode === 'recording') &&
+      s.phase_start_at != null && s.phase_end_at != null) {
+    phaseMode = s.mode;
+    phaseStartAt = s.phase_start_at;
+    phaseEndAt = s.phase_end_at;
+  } else if (['idle', 'queued', 'error', 'starting_up', 'playing'].includes(s.mode)) {
+    phaseMode = s.mode;
+    phaseStartAt = null;
+    phaseEndAt = null;
+  }
+}
+
+function updatePhaseDisplay() {
+  if (phaseStartAt == null || phaseEndAt == null) {
+    $phaseOverlay.className = 'phase-overlay';
+    return;
+  }
+
+  const now = Date.now() / 1000 + clockOffset;
+  const total = phaseEndAt - phaseStartAt;
+  const remaining = Math.max(0, phaseEndAt - now);
+  const ratio = total > 0 ? Math.min(1, Math.max(0, remaining / total)) : 0;
+
+  // Show overlay with appropriate class
+  $phaseOverlay.className = 'phase-overlay active ' + phaseMode;
+  $phaseFill.style.width = (ratio * 100) + '%';
+
+  if (phaseMode === 'countdown') {
+    // Countdown: show big integer (3, 2, 1)
+    $phaseNumber.textContent = Math.ceil(remaining);
+    $phaseSublabel.textContent = 'GET READY';
+    $phaseStopBtn.textContent = 'Cancel';
+  } else if (phaseMode === 'recording') {
+    // Recording: show decimal seconds with blinking dot
+    $phaseNumber.innerHTML = '<span class="rec-dot"></span>' + remaining.toFixed(1) + 's';
+    $phaseSublabel.textContent = 'RECORDING';
+    $phaseStopBtn.textContent = 'Stop Recording';
+  }
+}
+
+/* Animation loop — runs continuously via requestAnimationFrame */
+function animationLoop() {
+  updatePhaseDisplay();
+  requestAnimationFrame(animationLoop);
+}
+animationLoop();
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 6: DATASET UI
+// ═══════════════════════════════════════════════════════════════════════
+
+function updateDatasetUI(ds) {
+  $datasetSelect.innerHTML = '';
+  (ds.entries || []).forEach(e => {
+    const opt = document.createElement('option');
+    opt.value = e.id;
+    // Prefix downloaded datasets with arrow icon
+    opt.textContent = (e.origin === 'downloaded' ? '\u2B07 ' : '') + (e.label || e.id);
+    $datasetSelect.appendChild(opt);
+  });
+  $datasetSelect.value = ds.active_id || '';
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 7: MOVES LIST RENDERING
+// ═══════════════════════════════════════════════════════════════════════
+
+function reconcileMoves(moves) {
+  // Remove selected IDs that no longer exist in the move list
+  const ids = new Set(moves.map(m => m.id));
+  for (const id of [...selectedMoves]) {
+    if (!ids.has(id)) selectedMoves.delete(id);
+  }
+}
+
+function renderMoves(moves, mode, activeMove) {
+  if (!moves.length) {
+    $movesList.innerHTML = `
+      <div class="moves-empty">
+        <div class="moves-empty-icon">&#9898;</div>
+        Record your first move to see it here
+      </div>`;
+    return;
+  }
+
+  $movesList.innerHTML = '';
+  moves.forEach(m => {
+    const card = document.createElement('div');
+    card.className = 'move-card' +
+      (activeMove === m.id && mode === 'playing' ? ' is-playing' : '');
+
+    // Checkbox for batch upload selection
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'move-check';
+    cb.checked = selectedMoves.has(m.id);
+    cb.onchange = () => {
+      cb.checked ? selectedMoves.add(m.id) : selectedMoves.delete(m.id);
+      updateUploadBar();
+    };
+
+    // Move info (name + metadata)
+    const info = document.createElement('div');
+    info.className = 'move-info';
+
+    const name = document.createElement('div');
+    name.className = 'move-name';
+    name.textContent = m.label || m.id;
+    info.appendChild(name);
+
+    const meta = document.createElement('div');
+    meta.className = 'move-meta-row';
+    const dot = document.createElement('span');
+    dot.className = 'audio-dot ' + (m.has_audio ? 'has' : 'none');
+    meta.appendChild(dot);
+    const dur = m.duration != null ? m.duration.toFixed(1) + 's' : '--';
+    const date = new Date(m.created_at * 1000).toLocaleDateString();
+    meta.appendChild(document.createTextNode(dur + ' \u00B7 ' + date));
+    info.appendChild(meta);
+
+    // "Uploaded" badge
+    if (m.is_uploaded) {
+      const badge = document.createElement('span');
+      badge.className = 'move-badge uploaded';
+      badge.textContent = 'uploaded';
+      info.appendChild(badge);
+    }
+
+    // Action buttons
+    const actions = document.createElement('div');
+    actions.className = 'move-actions';
+
+    const playBtn = document.createElement('button');
+    playBtn.className = 'move-action play-action';
+    playBtn.textContent = (mode === 'playing' && activeMove === m.id) ? 'Stop' : 'Play';
+    playBtn.disabled = busy && !(mode === 'playing' && activeMove === m.id);
+    playBtn.onclick = () => {
+      if (mode === 'playing' && activeMove === m.id) stopPlayback();
+      else queuePlayback(m.id);
+    };
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'move-action delete-action';
+    delBtn.textContent = 'Delete';
+    delBtn.disabled = busy;
+    delBtn.onclick = () => deleteMove(m.id);
+
+    actions.appendChild(playBtn);
+    actions.appendChild(delBtn);
+
+    card.appendChild(cb);
+    card.appendChild(info);
+    card.appendChild(actions);
+    $movesList.appendChild(card);
+  });
+}
+
+function updateUploadBar() {
+  const count = selectedMoves.size;
+  if (count > 0) {
+    $uploadBar.style.display = 'flex';
+    $uploadCount.textContent = count + ' selected';
+    // Upload requires HF login — button disabled if no username detected
+    $uploadBtn.disabled = !hfUsername;
+  } else {
+    $uploadBar.style.display = 'none';
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 8: USER ACTIONS — API calls triggered by user interactions
+// ═══════════════════════════════════════════════════════════════════════
+
+async function queueRecording() {
+  if (busy) return;
+  const dur = parseFloat($recDuration.value) || parseFloat($recDuration.placeholder) || 5;
+  const label = $recName.value.trim() || null;
+  const audioSrc = document.querySelector('input[name="audio-src"]:checked')?.value || 'mic';
+  const recordAudio = audioSrc !== 'none';
+  const audioId = audioSrc === 'upload' ? uploadedAudioId : null;
+
+  if (audioSrc === 'upload' && !uploadedAudioId) return;
+
+  $recordBtn.disabled = true;
+  try {
+    const payload = { duration: dur, record_audio: recordAudio, label };
+    if (audioId) payload.uploaded_audio_id = audioId;
+    const r = await apiFetch('/api/record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    await fetchState();
+    $recName.value = '';
+    if (audioSrc === 'upload') { uploadedAudioId = null; uploadedAudioFilename = null; }
+  } catch (e) {
+    console.error('Record error:', e);
+  } finally {
+    $recordBtn.disabled = false;
+  }
+}
+
+async function queuePlayback(id) {
+  if (busy) return;
+  try {
+    const r = await apiFetch('/api/play', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ move_id: id }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    await fetchState();
+  } catch (e) { console.error('Play error:', e); }
+}
+
+async function stopPlayback() {
+  try { await apiFetch('/api/play/stop', { method: 'POST' }); } catch (e) { console.error(e); }
+}
+
+async function stopRecording() {
+  try { await apiFetch('/api/record/stop', { method: 'POST' }); } catch (e) { console.error(e); }
+}
+
+async function deleteMove(id) {
+  if (busy) return;
+  if (!confirm(`Delete "${id}"? This cannot be undone.`)) return;
+  try {
+    const r = await apiFetch('/api/moves/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    selectedMoves.delete(id);
+    await fetchState();
+  } catch (e) { console.error('Delete error:', e); }
+}
+
+async function selectDataset(id) {
+  try {
+    const r = await apiFetch('/api/datasets/select', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataset_id: id }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    selectedMoves.clear();
+    await fetchState();
+  } catch (e) { console.error(e); }
+}
+
+async function createDataset(name) {
+  if (!name || !/^[a-z0-9_-]+$/.test(name)) return;
+  try {
+    const r = await apiFetch('/api/datasets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.detail || r.statusText);
+    }
+    await fetchState();
+    $newDatasetInline.classList.remove('active');
+    $newDatasetBtn.style.display = '';
+    $newDatasetInput.value = '';
+  } catch (e) { console.error(e); alert(e.message); }
+}
+
+async function syncToHF() {
+  if (!hfUsername || !selectedMoves.size) return;
+  $uploadBtn.disabled = true;
+  $uploadBtn.textContent = 'Uploading...';
+  try {
+    const r = await apiFetch('/api/datasets/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hf_username: hfUsername, move_ids: [...selectedMoves] }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    selectedMoves.clear();
+    await fetchState();
+  } catch (e) {
+    console.error(e);
+    alert('Upload failed: ' + e.message);
+  } finally {
+    $uploadBtn.textContent = 'Upload to HF';
+    $uploadBtn.disabled = false;
+    updateUploadBar();
+  }
+}
+
+async function updateDatasetRoot() {
+  const path = $datasetRootInput.value.trim();
+  if (!path) return;
+  try {
+    const r = await apiFetch('/api/datasets/root', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    await fetchState();
+  } catch (e) { console.error(e); }
+}
+
+async function uploadAudioFile(file) {
+  if (!file) return;
+  $audioUploadStatus.textContent = file.name.endsWith('.mp3') ? 'Converting MP3...' : 'Uploading...';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await apiFetch('/api/upload-audio', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    const data = await r.json();
+    uploadedAudioId = data.upload_id;
+    uploadedAudioFilename = data.filename;
+    $audioUploadStatus.textContent = `Ready: ${data.filename}` + (data.duration ? ` (${data.duration.toFixed(1)}s)` : '');
+    if (data.duration && $recDuration) $recDuration.value = (Math.round(data.duration * 10) / 10).toFixed(1);
+  } catch (e) {
+    $audioUploadStatus.textContent = 'Failed: ' + e.message;
+    uploadedAudioId = null;
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 9: COMMUNITY DATASETS
+// ═══════════════════════════════════════════════════════════════════════
+
+async function fetchCommunity() {
+  $communityStatus.textContent = 'Searching Hugging Face...';
+  communitySelection.clear();
+  try {
+    const r = await apiFetch('/api/datasets/community', { cache: 'no-store' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Error');
+    const ds = data.datasets || [];
+    renderCommunity(ds);
+    $communityStatus.textContent = ds.length
+      ? `Found ${ds.length} dataset${ds.length === 1 ? '' : 's'}`
+      : 'No community datasets yet.';
+  } catch (e) {
+    $communityStatus.textContent = 'Error: ' + e.message;
+  }
+}
+
+function renderCommunity(datasets) {
+  $communityList.innerHTML = '';
+  datasets.forEach(d => {
+    const card = document.createElement('div');
+    card.className = 'community-card';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'comm-check';
+    cb.checked = communitySelection.has(d.repo_id);
+    cb.onchange = () => {
+      cb.checked ? communitySelection.add(d.repo_id) : communitySelection.delete(d.repo_id);
+      $downloadCommunityBtn.disabled = !communitySelection.size;
+    };
+
+    const info = document.createElement('div');
+    info.className = 'comm-info';
+    info.innerHTML = `<div class="comm-name">${d.pretty_name || d.repo_id}</div>
+                      <div class="comm-repo">${d.repo_id}</div>`;
+    const stats = document.createElement('div');
+    stats.className = 'comm-stats';
+    const parts = [];
+    if (d.likes != null) parts.push(d.likes + ' likes');
+    if (d.downloads != null) parts.push(d.downloads + ' downloads');
+    if (d.last_modified) parts.push(new Date(d.last_modified).toLocaleDateString());
+    stats.textContent = parts.join(' \u00B7 ');
+    info.appendChild(stats);
+
+    card.appendChild(cb);
+    card.appendChild(info);
+    $communityList.appendChild(card);
+  });
+}
+
+async function downloadCommunity() {
+  if (!communitySelection.size) return;
+  $downloadCommunityBtn.disabled = true;
+  $downloadCommunityBtn.textContent = 'Downloading...';
+  try {
+    for (const repoId of communitySelection) {
+      const [owner, name] = repoId.split('/', 2);
+      const r = await apiFetch('/api/datasets/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_id: repoId, label: `${name} (${owner})` }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'Error');
+    }
+    communitySelection.clear();
+    $communityStatus.textContent = 'Download complete.';
+    await fetchState();
+  } catch (e) {
+    $communityStatus.textContent = 'Error: ' + e.message;
+  } finally {
+    $downloadCommunityBtn.textContent = 'Download selected';
+    $downloadCommunityBtn.disabled = !communitySelection.size;
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 10: EXPERIMENTAL FEATURES UI
+// ═══════════════════════════════════════════════════════════════════════
+
+function updateExperimentalUI(config) {
+  const features = config.features || {};
+  $featureMotionModels.checked = !!features.motion_models;
+
+  const modelsPayload = config.motion_models;
+  const hasModels = modelsPayload && Array.isArray(modelsPayload.models) && modelsPayload.models.length;
+  const enabled = features.motion_models && hasModels;
+  $motionModelGroup.style.display = enabled ? '' : 'none';
+
+  if (!enabled) return;
+  $motionModelSelect.innerHTML = '';
+  modelsPayload.models.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m.name;
+    o.textContent = m.label;
+    $motionModelSelect.appendChild(o);
+  });
+  $motionModelSelect.value = modelsPayload.active || '';
+  const current = modelsPayload.models.find(m => m.name === modelsPayload.active);
+  if ($motionModelHint) $motionModelHint.textContent = current ? current.description : '';
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 11: EVENT LISTENERS
+//
+// All user interactions are wired up here. Each listener calls the
+// appropriate action function from Section 8.
+// ═══════════════════════════════════════════════════════════════════════
+
+/* Record button — either starts recording or stops it */
+$recordBtn.addEventListener('click', () => {
+  if (busy && (phaseMode === 'recording' || phaseMode === 'countdown')) {
+    stopRecording();
+  } else {
+    queueRecording();
+  }
+});
+
+/* Phase overlay stop button */
+$phaseStopBtn.addEventListener('click', stopRecording);
+
+/* Dataset selector */
+$datasetSelect.addEventListener('change', e => {
+  if (e.target.value) selectDataset(e.target.value);
+});
+
+/* New dataset creation (inline form) */
+$newDatasetBtn.addEventListener('click', () => {
+  $newDatasetInline.classList.add('active');
+  $newDatasetBtn.style.display = 'none';
+  $newDatasetInput.value = '';
+  $newDatasetInput.focus();
+});
+$cancelDatasetBtn.addEventListener('click', () => {
+  $newDatasetInline.classList.remove('active');
+  $newDatasetBtn.style.display = '';
+});
+$createDatasetBtn.addEventListener('click', () => createDataset($newDatasetInput.value.trim()));
+$newDatasetInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); createDataset($newDatasetInput.value.trim()); }
+  if (e.key === 'Escape') { $newDatasetInline.classList.remove('active'); $newDatasetBtn.style.display = ''; }
+});
+/* Auto-lowercase and replace spaces with underscores */
+$newDatasetInput.addEventListener('input', e => {
+  e.target.value = e.target.value.toLowerCase().replace(/\s+/g, '_');
+});
+
+/* Upload to Hugging Face */
+$uploadBtn.addEventListener('click', syncToHF);
+
+/* Settings drawer open/close */
+$settingsBtn.addEventListener('click', () => {
+  $settingsBackdrop.classList.add('open');
+  $settingsDrawer.classList.add('open');
+});
+$settingsBackdrop.addEventListener('click', () => {
+  $settingsBackdrop.classList.remove('open');
+  $settingsDrawer.classList.remove('open');
+});
+$settingsClose.addEventListener('click', () => {
+  $settingsBackdrop.classList.remove('open');
+  $settingsDrawer.classList.remove('open');
+});
+
+/* Dataset root update */
+$updateRootBtn.addEventListener('click', updateDatasetRoot);
+
+/* Audio source radio buttons */
+document.querySelectorAll('input[name="audio-src"]').forEach(r => {
+  r.addEventListener('change', () => {
+    $audioUploadSection.style.display = (r.value === 'upload' && r.checked) ? '' : 'none';
+    if (r.value !== 'upload') {
+      uploadedAudioId = null;
+      uploadedAudioFilename = null;
+      $audioUploadStatus.textContent = '';
+    }
+  });
+});
+
+/* Audio upload zone — click and drag-and-drop */
+$audioUploadZone.addEventListener('click', () => $audioFileInput.click());
+$audioFileInput.addEventListener('change', e => {
+  if (e.target.files?.[0]) uploadAudioFile(e.target.files[0]);
+});
+$audioUploadZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  $audioUploadZone.classList.add('drag-over');
+});
+$audioUploadZone.addEventListener('dragleave', e => {
+  e.preventDefault();
+  $audioUploadZone.classList.remove('drag-over');
+});
+$audioUploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  $audioUploadZone.classList.remove('drag-over');
+  const f = e.dataTransfer?.files?.[0];
+  if (f && /\.(wav|mp3)$/i.test(f.name)) uploadAudioFile(f);
+});
+
+/* Experimental features */
+$featureMotionModels.addEventListener('change', e => {
+  apiFetch('/api/experiments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ motion_models: e.target.checked }),
+  }).then(() => fetchState());
+});
+$motionModelSelect.addEventListener('change', e => {
+  if (e.target.value) {
+    apiFetch('/api/motion-model', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: e.target.value }),
+    }).then(() => fetchState());
+  }
+});
+
+/* Duration persistence — saves to backend after 500ms debounce */
+let durTimer = null;
+$recDuration.addEventListener('change', () => {
+  const v = parseFloat($recDuration.value);
+  if (!v || isNaN(v)) return;
+  clearTimeout(durTimer);
+  durTimer = setTimeout(() => {
+    apiFetch('/api/experiments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duration_seconds: v }),
+    });
+  }, 500);
+});
+
+/* Tab switching */
+document.querySelectorAll('.section-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab)?.classList.add('active');
+  });
+});
+
+/* Community */
+$fetchCommunityBtn.addEventListener('click', fetchCommunity);
+$downloadCommunityBtn.addEventListener('click', downloadCommunity);
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTION 12: INIT
+// ═══════════════════════════════════════════════════════════════════════
+
+/* Show mock banner if in mock mode */
+if (MOCK && $mockBanner) $mockBanner.style.display = 'block';
+
+/* Start polling */
+startPolling();
+</script>
+</body>
+</html>

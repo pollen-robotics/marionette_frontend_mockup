@@ -1565,6 +1565,7 @@ let phaseStartAt = null;  // Server timestamp: when current phase started
 let phaseEndAt = null;    // Server timestamp: when current phase ends
 let countdownEndAt = null;  // Server timestamp: when countdown ends (= recording starts)
 let recordingEndAt = null;  // Server timestamp: when recording ends
+let requestedDuration = null; // Duration the user requested (seconds), for predicting recording end
 let selectedMoves = new Set();    // Move IDs selected for HF upload
 let communitySelection = new Set(); // Community dataset repo_ids selected for download
 let uploadedAudioId = null;       // ID of uploaded audio file (from /api/upload-audio)
@@ -1764,6 +1765,7 @@ function updatePhase(s) {
     phaseEndAt = null;
     countdownEndAt = null;
     recordingEndAt = null;
+    requestedDuration = null;
   }
 }
 
@@ -1776,29 +1778,50 @@ function updatePhaseDisplay() {
 
   const now = Date.now() / 1000 + clockOffset;
 
-  if (phaseMode === 'countdown') {
+  // Determine the effective display phase. When phaseMode is still
+  // 'countdown' (poll hasn't caught up yet) but the countdown timer has
+  // expired, we PREDICT the recording phase locally. This eliminates the
+  // up-to-1.5s visual lag between countdown ending and "Recording" appearing.
+  let displayPhase = phaseMode;
+  if (phaseMode === 'countdown' && now >= phaseEndAt) {
+    displayPhase = 'recording';
+  }
+
+  if (displayPhase === 'countdown') {
     // ── COUNTDOWN PHASE ──
     // Show "3", "2", "1" as big blue integers.
     // Progress bar stays pinned at 100% (nothing consumed yet).
-    const remaining = Math.max(0, phaseEndAt - now);
+    const remaining = phaseEndAt - now;
     const secs = Math.ceil(remaining);
 
     $phaseOverlay.className = 'phase-overlay active phase-countdown';
     $phaseFill.style.width = '100%';
-
-    // Show the countdown number (3, 2, 1). When it hits 0, we'll
-    // still be in countdown mode briefly until the backend switches
-    // to recording — show "1" as the minimum to avoid showing "0".
     $phaseNumber.textContent = Math.max(1, secs);
     $phaseSublabel.textContent = 'GET READY';
     $phaseStopBtn.textContent = 'Cancel';
 
-  } else if (phaseMode === 'recording') {
+  } else if (displayPhase === 'recording') {
     // ── RECORDING PHASE ──
-    // Show "Recording" as big red text with blinking dot.
-    // Progress bar drains from 100% → 0% over the recording duration.
-    const recTotal = phaseEndAt - phaseStartAt;
-    const recRemaining = Math.max(0, phaseEndAt - now);
+    // Show "Recording" with blinking dot. Progress bar drains 100% → 0%.
+    //
+    // Two cases:
+    // A) Backend has confirmed recording (phaseMode === 'recording'):
+    //    use the real phase_start_at / phase_end_at timestamps.
+    // B) Predicted recording (phaseMode still 'countdown' but timer expired):
+    //    recording started at countdownEndAt, ends at countdownEndAt + requestedDuration.
+    let recStart, recEnd;
+    if (phaseMode === 'recording') {
+      // Case A: real timestamps from backend
+      recStart = phaseStartAt;
+      recEnd = phaseEndAt;
+    } else {
+      // Case B: predicted — countdown expired, poll hasn't caught up yet
+      recStart = countdownEndAt || phaseEndAt;
+      recEnd = recStart + (requestedDuration || 5);
+    }
+
+    const recTotal = recEnd - recStart;
+    const recRemaining = Math.max(0, recEnd - now);
     const ratio = recTotal > 0 ? Math.min(1, Math.max(0, recRemaining / recTotal)) : 0;
 
     $phaseOverlay.className = 'phase-overlay active phase-recording';
@@ -1956,6 +1979,7 @@ async function queueRecording() {
 
   if (audioSrc === 'upload' && !uploadedAudioId) return;
 
+  requestedDuration = dur; // Store for phase prediction
   $recordBtn.disabled = true;
   try {
     const payload = { duration: dur, record_audio: recordAudio, label };

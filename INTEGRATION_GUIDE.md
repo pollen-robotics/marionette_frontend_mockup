@@ -535,19 +535,26 @@ It's intentionally always running (even when the overlay is hidden) to avoid
 setup/teardown complexity. The cost is negligible since `updatePhaseDisplay()`
 short-circuits when `phaseStartAt == null`.
 
-### Visual comparison
+### Continuous overlay design
+
+The overlay is ONE CONTINUOUS EXPERIENCE — no jarring screen switch between
+countdown and recording. The progress bar is always visible:
 
 | Property | Countdown | Recording |
 |---|---|---|
 | Background | Blue radial gradient | Red radial gradient |
-| CSS class | `.countdown` | `.recording` |
-| Number | Integer: `3`, `2`, `1` | Decimal: `4.2s` |
-| Number size | 8–14rem (huge) | 4–7rem (large) |
+| CSS class | `.phase-countdown` | `.phase-recording` |
+| Main text | Integer: `3`, `2`, `1` | "Recording" (with blinking dot) |
+| Text size | 8–14rem (huge) | 3–5.5rem (large word) |
 | Text color | `--blue` (#38bdf8) | `--accent` (#e11d48) |
-| Sublabel | "GET READY" | "RECORDING" |
-| Indicator | Pulsing number | Blinking red dot |
-| Progress bar | Blue fill | Red fill |
+| Sublabel | "GET READY" | "4.2s remaining" |
+| Progress bar | **Pinned at 100%** (blue) | **Drains 100% → 0%** (red) |
 | Stop button | "Cancel" | "Stop Recording" |
+
+The progress bar staying at 100% during countdown communicates "nothing is
+consumed yet." The moment recording starts, the bar begins draining and the
+text switches from a number to "Recording" — giving a clear, unambiguous
+start moment with no screen change.
 
 ## 10. Design Decisions & Rationale <a id="design-decisions"></a>
 

@@ -406,17 +406,20 @@ input[type=number] { -moz-appearance: textfield; }
 .downloaded-warning.visible { display: block; }
 
 /* ═══════════════════════════════════════════════════════════════════
-   PHASE OVERLAY — Full-screen countdown / recording display.
+   PHASE OVERLAY — Continuous countdown → recording display.
 
    This overlay covers the entire screen during countdown and recording.
-   It's the biggest UX improvement over the original app, where users
-   confused the countdown with the actual recording.
+   It's designed as ONE CONTINUOUS EXPERIENCE — no jarring screen change.
 
-   TWO DISTINCT PHASES:
-   1. Countdown (3s): BLUE, giant integer numbers (3, 2, 1), "GET READY"
-   2. Recording: RED, decimal timer (4.2s), blinking dot, "RECORDING"
+   FLOW:
+   1. Countdown: big "3", "2", "1" in blue. Progress bar pinned at 100%.
+   2. Transition: text changes to "Recording" in red. Progress bar starts
+      draining from 100% → 0% over the recording duration.
+   3. Recording: "Recording" stays, remaining time shown below.
 
-   The visual difference is dramatic and impossible to confuse.
+   The progress bar is ALWAYS visible. It stays full during countdown
+   (communicating "nothing is consumed yet") and only starts draining
+   when recording actually begins, giving a clear start moment.
 
    INTEGRATION: The overlay is driven by phase_start_at / phase_end_at
    from the backend state. The animation loop (requestAnimationFrame)
@@ -430,70 +433,63 @@ input[type=number] { -moz-appearance: textfield; }
   align-items: center;
   justify-content: center;
   gap: 1rem;
+  background: var(--bg);
 }
 .phase-overlay.active { display: flex; }
 
-/* Countdown variant — cool blue radial gradient background */
-.phase-overlay.countdown {
+/* Subtle radial glow behind the content — color changes with phase */
+.phase-overlay.phase-countdown {
   background: radial-gradient(circle at center, rgba(14,165,233,.08), var(--bg) 70%);
 }
-/* Recording variant — warm red radial gradient background */
-.phase-overlay.recording {
+.phase-overlay.phase-recording {
   background: radial-gradient(circle at center, rgba(225,29,72,.06), var(--bg) 70%);
 }
 
-/* The big number display */
+/* The big number / text display */
 .phase-number {
   font-size: clamp(8rem, 20vw, 14rem);
   font-weight: 800;
   line-height: 1;
   letter-spacing: -.06em;
   font-variant-numeric: tabular-nums;
+  transition: color .3s, text-shadow .3s;
 }
-.countdown .phase-number {
+
+/* Countdown numbers: blue with pulse animation */
+.phase-countdown .phase-number {
   color: var(--blue);
   text-shadow: 0 0 80px var(--blue-glow);
   animation: countPulse .9s ease-in-out infinite;
 }
-.recording .phase-number {
+
+/* "Recording" word: red, slightly smaller so it fits, no pulse */
+.phase-recording .phase-number {
   color: var(--accent);
   text-shadow: 0 0 60px var(--accent-glow);
-  font-size: clamp(4rem, 12vw, 7rem);
+  font-size: clamp(3rem, 10vw, 5.5rem);
+  letter-spacing: -.03em;
+  animation: none;
 }
+
 @keyframes countPulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: .7; transform: scale(1.05); }
 }
 
-/* Phase sublabel text (GET READY / RECORDING) */
+/* Sublabel below the main text (time remaining during recording) */
 .phase-sublabel {
-  font-size: 1rem;
+  font-size: 1.1rem;
   text-transform: uppercase;
   letter-spacing: .2em;
   font-weight: 600;
+  font-family: var(--font-mono);
+  min-height: 1.5em; /* Prevent layout shift when text changes */
 }
-.countdown .phase-sublabel { color: var(--blue); }
-.recording .phase-sublabel { color: var(--accent); }
+.phase-countdown .phase-sublabel { color: var(--blue); }
+.phase-recording .phase-sublabel { color: var(--accent); }
 
-/* Progress bar at the bottom of the overlay */
-.phase-progress {
-  width: min(320px, 80vw);
-  height: 4px;
-  border-radius: 2px;
-  background: var(--surface-2);
-  overflow: hidden;
-  margin-top: .5rem;
-}
-.phase-progress-fill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width .1s linear;
-}
-.countdown .phase-progress-fill { background: var(--blue); }
-.recording .phase-progress-fill { background: var(--accent); }
-
-/* Blinking red dot during recording (in the number display) */
-.recording .rec-dot {
+/* Blinking red dot — shown inline before "Recording" text during recording */
+.rec-dot {
   width: 12px; height: 12px;
   border-radius: 50%;
   background: var(--accent);
@@ -503,6 +499,25 @@ input[type=number] { -moz-appearance: textfield; }
   vertical-align: middle;
 }
 @keyframes recBlink { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* Progress bar — always visible in the overlay.
+   During countdown: pinned at 100% (blue).
+   During recording: drains from 100% → 0% (red). */
+.phase-progress {
+  width: min(400px, 80vw);
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-top: 1rem;
+}
+.phase-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .1s linear, background-color .3s;
+}
+.phase-countdown .phase-progress-fill { background: var(--blue); }
+.phase-recording .phase-progress-fill { background: var(--accent); }
 
 /* Stop/Cancel button in the overlay */
 .phase-stop-btn {
@@ -1548,6 +1563,8 @@ let clockOffset = 0;      // Diff between server clock and local clock (seconds)
 let phaseMode = 'idle';   // Current phase for overlay: 'idle', 'countdown', 'recording'
 let phaseStartAt = null;  // Server timestamp: when current phase started
 let phaseEndAt = null;    // Server timestamp: when current phase ends
+let countdownEndAt = null;  // Server timestamp: when countdown ends (= recording starts)
+let recordingEndAt = null;  // Server timestamp: when recording ends
 let selectedMoves = new Set();    // Move IDs selected for HF upload
 let communitySelection = new Set(); // Community dataset repo_ids selected for download
 let uploadedAudioId = null;       // ID of uploaded audio file (from /api/upload-audio)
@@ -1710,56 +1727,85 @@ function updateUI(s) {
 
 
 // ═══════════════════════════════════════════════════════════════════════
-// SECTION 5: PHASE OVERLAY — Countdown & Recording full-screen display
+// SECTION 5: PHASE OVERLAY — Continuous countdown → recording display
+//
+// DESIGN: The overlay is ONE CONTINUOUS EXPERIENCE across both phases.
+// During countdown: shows "3", "2", "1" with progress bar pinned at 100%.
+// At the instant recording starts: text changes to "Recording" with a
+// blinking red dot, and the progress bar begins draining from 100% → 0%.
 //
 // TIMING APPROACH: The backend sends phase_start_at and phase_end_at
-// as Unix timestamps. The frontend computes progress as:
-//   remaining = phase_end_at - (local_time + clock_offset)
-//   ratio = remaining / (phase_end_at - phase_start_at)
-//
+// as Unix timestamps (different values for countdown vs recording).
 // clock_offset = server_time - local_time, calibrated each poll.
-// This handles network jitter and clock drift.
+//
+// We track countdownEndAt and recordingEndAt separately so the progress
+// bar knows the recording duration even during the countdown phase.
 // ═══════════════════════════════════════════════════════════════════════
 
 function updatePhase(s) {
   if (s.server_time) clockOffset = s.server_time - Date.now() / 1000;
 
-  if ((s.mode === 'countdown' || s.mode === 'recording') &&
-      s.phase_start_at != null && s.phase_end_at != null) {
-    phaseMode = s.mode;
+  if (s.mode === 'countdown' && s.phase_start_at != null && s.phase_end_at != null) {
+    phaseMode = 'countdown';
     phaseStartAt = s.phase_start_at;
     phaseEndAt = s.phase_end_at;
+    countdownEndAt = s.phase_end_at;
+    // recordingEndAt will be set when mode switches to recording
+  } else if (s.mode === 'recording' && s.phase_start_at != null && s.phase_end_at != null) {
+    phaseMode = 'recording';
+    phaseStartAt = s.phase_start_at;
+    phaseEndAt = s.phase_end_at;
+    recordingEndAt = s.phase_end_at;
+    // Keep countdownEndAt from before (it marks when recording started)
+    if (countdownEndAt == null) countdownEndAt = s.phase_start_at;
   } else if (['idle', 'queued', 'error', 'starting_up', 'playing'].includes(s.mode)) {
     phaseMode = s.mode;
     phaseStartAt = null;
     phaseEndAt = null;
+    countdownEndAt = null;
+    recordingEndAt = null;
   }
 }
 
 function updatePhaseDisplay() {
+  // Hide overlay when no active phase
   if (phaseStartAt == null || phaseEndAt == null) {
     $phaseOverlay.className = 'phase-overlay';
     return;
   }
 
   const now = Date.now() / 1000 + clockOffset;
-  const total = phaseEndAt - phaseStartAt;
-  const remaining = Math.max(0, phaseEndAt - now);
-  const ratio = total > 0 ? Math.min(1, Math.max(0, remaining / total)) : 0;
-
-  // Show overlay with appropriate class
-  $phaseOverlay.className = 'phase-overlay active ' + phaseMode;
-  $phaseFill.style.width = (ratio * 100) + '%';
 
   if (phaseMode === 'countdown') {
-    // Countdown: show big integer (3, 2, 1)
-    $phaseNumber.textContent = Math.ceil(remaining);
+    // ── COUNTDOWN PHASE ──
+    // Show "3", "2", "1" as big blue integers.
+    // Progress bar stays pinned at 100% (nothing consumed yet).
+    const remaining = Math.max(0, phaseEndAt - now);
+    const secs = Math.ceil(remaining);
+
+    $phaseOverlay.className = 'phase-overlay active phase-countdown';
+    $phaseFill.style.width = '100%';
+
+    // Show the countdown number (3, 2, 1). When it hits 0, we'll
+    // still be in countdown mode briefly until the backend switches
+    // to recording — show "1" as the minimum to avoid showing "0".
+    $phaseNumber.textContent = Math.max(1, secs);
     $phaseSublabel.textContent = 'GET READY';
     $phaseStopBtn.textContent = 'Cancel';
+
   } else if (phaseMode === 'recording') {
-    // Recording: show decimal seconds with blinking dot
-    $phaseNumber.innerHTML = '<span class="rec-dot"></span>' + remaining.toFixed(1) + 's';
-    $phaseSublabel.textContent = 'RECORDING';
+    // ── RECORDING PHASE ──
+    // Show "Recording" as big red text with blinking dot.
+    // Progress bar drains from 100% → 0% over the recording duration.
+    const recTotal = phaseEndAt - phaseStartAt;
+    const recRemaining = Math.max(0, phaseEndAt - now);
+    const ratio = recTotal > 0 ? Math.min(1, Math.max(0, recRemaining / recTotal)) : 0;
+
+    $phaseOverlay.className = 'phase-overlay active phase-recording';
+    $phaseFill.style.width = (ratio * 100) + '%';
+
+    $phaseNumber.innerHTML = '<span class="rec-dot"></span>Recording';
+    $phaseSublabel.textContent = recRemaining.toFixed(1) + 's remaining';
     $phaseStopBtn.textContent = 'Stop Recording';
   }
 }

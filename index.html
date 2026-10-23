@@ -2219,8 +2219,13 @@ function renderCommunity(datasets) {
 
     const info = document.createElement('div');
     info.className = 'comm-info';
-    info.innerHTML = `<div class="comm-name">${d.pretty_name || d.repo_id}</div>
-                      <div class="comm-repo">${d.repo_id}</div>`;
+    const commName = document.createElement('div');
+    commName.className = 'comm-name';
+    commName.textContent = d.pretty_name || d.repo_id;
+    const commRepo = document.createElement('div');
+    commRepo.className = 'comm-repo';
+    commRepo.textContent = d.repo_id;
+    info.append(commName, commRepo);
     const stats = document.createElement('div');
     stats.className = 'comm-stats';
     const parts = [];

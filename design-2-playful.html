@@ -817,7 +817,8 @@ function renderComm(ds){
     cb.checked=csel.has(d.repo_id);
     cb.onchange=()=>{cb.checked?csel.add(d.repo_id):csel.delete(d.repo_id);$cdl.disabled=!csel.size;};
     const inf=document.createElement('div');inf.className='ci';
-    inf.innerHTML=`<div class="cn">${d.pretty_name||d.repo_id}</div><div class="cr">${d.repo_id}</div>`;
+    const cn=document.createElement('div');cn.className='cn';cn.textContent=d.pretty_name||d.repo_id;
+    const cr=document.createElement('div');cr.className='cr';cr.textContent=d.repo_id;inf.append(cn,cr);
     const st=document.createElement('div');st.className='cs';
     const p=[];if(d.likes!=null)p.push(d.likes+' likes');if(d.downloads!=null)p.push(d.downloads+' dl');
     if(d.last_modified)p.push(new Date(d.last_modified).toLocaleDateString());
